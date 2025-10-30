@@ -3,7 +3,6 @@
 A CSV processing system with microservices architecture using Docker. The system consists of 2 instances of the same WebAPI service, connected to RabbitMQ, MinIO S3, and PostgreSQL.
 
 
-## Phân tích luồng sau khi thay đổi
 
 1. **Actor** gửi yêu cầu export/import CSV tới **WebAPI** (2 instance, cùng source code).
 

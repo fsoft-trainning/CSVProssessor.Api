@@ -58,10 +58,12 @@ public static class IocContainer
             .AddEnvironmentVariables()
             .Build();
 
-        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        // Ưu tiên lấy từ biến môi trường DB_CONNECTION_STRING (dùng cho Docker Compose)
+        var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING")
+            ?? configuration.GetConnectionString("DefaultConnection");
 
         if (string.IsNullOrEmpty(connectionString))
-            throw new InvalidOperationException("DefaultConnection string is missing in configuration.");
+            throw new InvalidOperationException("Database connection string is missing in configuration or environment variable DB_CONNECTION_STRING.");
 
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(connectionString, npgsqlOptions =>
