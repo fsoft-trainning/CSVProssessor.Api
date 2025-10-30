@@ -21,18 +21,31 @@ namespace CSVProssessor.Application.Services.Common
             // - MINIO_ENDPOINT
             // - MINIO_ACCESS_KEY
             // - MINIO_SECRET_KEY
-            var endpoint = Environment.GetEnvironmentVariable("MINIO_ENDPOINT");
-            var accessKey = Environment.GetEnvironmentVariable("MINIO_ACCESS_KEY");
-            var secretKey = Environment.GetEnvironmentVariable("MINIO_SECRET_KEY");
+            var endpoint = Environment.GetEnvironmentVariable("MINIO_ENDPOINT")?.Trim();
+            var accessKey = Environment.GetEnvironmentVariable("MINIO_ACCESS_KEY")?.Trim();
+            var secretKey = Environment.GetEnvironmentVariable("MINIO_SECRET_KEY")?.Trim();
+
+            if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(accessKey) || string.IsNullOrWhiteSpace(secretKey))
+            {
+                throw new InvalidOperationException("MinIO configuration is missing. Please set MINIO_ENDPOINT, MINIO_ACCESS_KEY, and MINIO_SECRET_KEY environment variables.");
+            }
 
             _logger.Info("Initializing BlobService...");
             _logger.Info($"Connecting to MinIO at: {endpoint}");
 
             try
             {
+                // Remove http:// or https:// prefix if present - MinIO expects just host:port
+                var cleanEndpoint = endpoint
+                    .Replace("https://", "", StringComparison.OrdinalIgnoreCase)
+                    .Replace("http://", "", StringComparison.OrdinalIgnoreCase)
+                    .Trim();
+
+                _logger.Info($"Cleaned endpoint: {cleanEndpoint}");
+
                 // Kết nối MinIO không dùng SSL (vì đang dùng IP:port hoặc HTTP)
                 _minioClient = new MinioClient()
-                    .WithEndpoint(endpoint)
+                    .WithEndpoint(cleanEndpoint)
                     .WithCredentials(accessKey, secretKey)
                     .WithSSL(false)
                     .Build();
