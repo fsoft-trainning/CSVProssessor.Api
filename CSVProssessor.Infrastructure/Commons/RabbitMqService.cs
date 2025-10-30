@@ -1,7 +1,7 @@
 ﻿using CSVProssessor.Infrastructure.Interfaces;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
+using System.Text;
 using System.Text.Json;
 
 namespace CSVProssessor.Infrastructure.Commons
@@ -12,53 +12,28 @@ namespace CSVProssessor.Infrastructure.Commons
         private readonly IChannel _channel;
         private readonly ILogger<RabbitMqService> _logger;
 
-        public RabbitMqService(IConfiguration configuration, ILogger<RabbitMqService> logger)
+        public RabbitMqService(IConnection connection, ILogger<RabbitMqService> logger)
         {
+            _connection = connection;
             _logger = logger;
-
-            try
-            {
-                // Read RabbitMQ configuration from environment variables or appsettings
-                var rabbitMqHost = configuration["RABBITMQ_HOST"] ?? configuration["RabbitMQ:Host"] ?? "localhost";
-                var rabbitMqPort = int.Parse(configuration["RABBITMQ_PORT"] ?? configuration["RabbitMQ:Port"] ?? "5672");
-                var rabbitMqUser = configuration["RABBITMQ_USER"] ?? configuration["RabbitMQ:User"] ?? "guest";
-                var rabbitMqPassword = configuration["RABBITMQ_PASSWORD"] ?? configuration["RabbitMQ:Password"] ?? "guest";
-
-                var factory = new ConnectionFactory
-                {
-                    HostName = rabbitMqHost,
-                    Port = rabbitMqPort,
-                    UserName = rabbitMqUser,
-                    Password = rabbitMqPassword,
-                    AutomaticRecoveryEnabled = true,
-                    NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
-                };
-
-                _connection = factory.CreateConnectionAsync().Result;
-                _channel = _connection.CreateChannelAsync().Result;
-
-                _logger.LogInformation($"Successfully connected to RabbitMQ at {rabbitMqHost}:{rabbitMqPort}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to initialize RabbitMQ connection");
-                throw;
-            }
+            _channel = connection.CreateChannelAsync().Result;
         }
 
         /// <summary>
         /// Publishes a message to a specified RabbitMQ queue or exchange (topic).
         /// </summary>
+        /// <typeparam name="T">The type of the message object.</typeparam>
+        /// <param name="destination">The name of the queue or exchange.</param>
+        /// <param name="message">The message object to be serialized and sent.</param>
         public async Task PublishAsync<T>(string destination, T message)
         {
             try
             {
-                // Serialize the message to JSON
+                // Serialize message to JSON
                 var jsonMessage = JsonSerializer.Serialize(message);
-                var body = System.Text.Encoding.UTF8.GetBytes(jsonMessage);
+                var body = Encoding.UTF8.GetBytes(jsonMessage);
 
-                // Declare the destination queue (idempotent - won't fail if already exists)
-                // This is used for direct queue publishing
+                // Declare queue with durable option
                 await _channel.QueueDeclareAsync(
                     queue: destination,
                     durable: true,
@@ -67,26 +42,75 @@ namespace CSVProssessor.Infrastructure.Commons
                     arguments: null
                 );
 
-                // Publish the message to the queue
+                // Publish message to queue
                 var properties = new BasicProperties
                 {
-                    Persistent = true,
-                    ContentType = "application/json"
+                    Persistent = true, // Make message persistent
+                    ContentType = "application/json",
+                    Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds())
                 };
 
                 await _channel.BasicPublishAsync(
-                    exchange: "",  // Use default exchange for direct queue publishing
+                    exchange: string.Empty,
                     routingKey: destination,
                     mandatory: false,
                     basicProperties: properties,
                     body: new ReadOnlyMemory<byte>(body)
                 );
 
-                _logger.LogInformation($"Message published to {destination}: {jsonMessage}");
+                _logger.LogInformation($"Message published successfully to queue '{destination}'. Message: {jsonMessage}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error publishing message to {destination}");
+                _logger.LogError(ex, $"Error publishing message to RabbitMQ queue '{destination}': {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Publishes a message to a RabbitMQ topic (fanout exchange) for broadcasting to multiple subscribers.
+        /// </summary>
+        /// <typeparam name="T">The type of the message object.</typeparam>
+        /// <param name="topicName">The name of the topic (exchange).</param>
+        /// <param name="message">The message object to be serialized and sent.</param>
+        public async Task PublishToTopicAsync<T>(string topicName, T message)
+        {
+            try
+            {
+                // Serialize message to JSON
+                var jsonMessage = JsonSerializer.Serialize(message);
+                var body = Encoding.UTF8.GetBytes(jsonMessage);
+
+                // Declare fanout exchange
+                await _channel.ExchangeDeclareAsync(
+                    exchange: topicName,
+                    type: ExchangeType.Fanout,
+                    durable: true,
+                    autoDelete: false,
+                    arguments: null
+                );
+
+                // Publish message to topic
+                var properties = new BasicProperties
+                {
+                    Persistent = true,
+                    ContentType = "application/json",
+                    Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+                };
+
+                await _channel.BasicPublishAsync(
+                    exchange: topicName,
+                    routingKey: string.Empty,
+                    mandatory: false,
+                    basicProperties: properties,
+                    body: new ReadOnlyMemory<byte>(body)
+                );
+
+                _logger.LogInformation($"Message published successfully to topic '{topicName}'. Message: {jsonMessage}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error publishing message to RabbitMQ topic '{topicName}': {ex.Message}");
                 throw;
             }
         }

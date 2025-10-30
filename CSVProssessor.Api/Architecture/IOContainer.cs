@@ -1,4 +1,6 @@
-﻿using CSVProssessor.Application.Interfaces.Common;
+﻿using CSVProssessor.Application.Interfaces;
+using CSVProssessor.Application.Interfaces.Common;
+using CSVProssessor.Application.Services;
 using CSVProssessor.Application.Services.Common;
 using CSVProssessor.Domain;
 using CSVProssessor.Infrastructure;
@@ -7,6 +9,7 @@ using CSVProssessor.Infrastructure.Interfaces;
 using CSVProssessor.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
+using RabbitMQ.Client;
 using System.Reflection;
 
 namespace CSVProssessor.Api.Architecture;
@@ -42,8 +45,30 @@ public static class IocContainer
 
         services.AddScoped<IBlobService, BlobService>();
         services.AddScoped<IRabbitMqService, RabbitMqService>();
+        services.AddScoped<ICsvService, CsvService>();
 
-        //services.AddHttpContextAccessor();
+        // Configure RabbitMQ Connection
+        services.AddSingleton(sp =>
+        {
+            var configuration = sp.GetRequiredService<IConfiguration>();
+            var rabbitmqHost = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? configuration["RabbitMQ:Host"] ?? "localhost";
+            var rabbitmqUser = Environment.GetEnvironmentVariable("RABBITMQ_USER") ?? configuration["RabbitMQ:User"] ?? "guest";
+            var rabbitmqPassword = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD") ?? configuration["RabbitMQ:Password"] ?? "guest";
+            var rabbitmqPort = int.Parse(Environment.GetEnvironmentVariable("RABBITMQ_PORT") ?? configuration["RabbitMQ:Port"] ?? "5672");
+
+            var factory = new ConnectionFactory()
+            {
+                HostName = rabbitmqHost,
+                UserName = rabbitmqUser,
+                Password = rabbitmqPassword,
+                Port = rabbitmqPort,
+                AutomaticRecoveryEnabled = true
+            };
+
+            return factory.CreateConnectionAsync().Result;
+        });
+
+        services.AddHttpContextAccessor();
 
         return services;
     }

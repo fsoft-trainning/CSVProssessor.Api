@@ -43,7 +43,7 @@ namespace CSVProssessor.Application.Services
             };
 
             // Add job to repository and save
-            await _unitOfWork.CsvJobRepository.AddAsync(csvJob);
+            await _unitOfWork.CsvJobs.AddAsync(csvJob);
             await _unitOfWork.SaveChangesAsync();
 
             // 3. Prepare and publish message to RabbitMQ queue
@@ -82,13 +82,13 @@ namespace CSVProssessor.Application.Services
                 UpdatedAt = DateTime.UtcNow
             };
 
-            await _unitOfWork.CsvJobRepository.AddAsync(csvJob);
+            await _unitOfWork.CsvJobs.AddAsync(csvJob);
             await _unitOfWork.SaveChangesAsync();
 
             try
             {
                 // 2. Query all CSV records from database
-                var records = await _unitOfWork.CsvRecordRepository.GetAllAsync();
+                var records = await _unitOfWork.CsvRecords.GetAllAsync();
 
                 // 3. Generate CSV content
                 using var ms = new MemoryStream();
