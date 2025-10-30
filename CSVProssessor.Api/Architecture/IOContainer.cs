@@ -42,6 +42,7 @@ public static class IocContainer
 
 
         services.AddScoped<IBlobService, BlobService>();
+        services.AddScoped<IRabbitMqService, RabbitMqService>();
 
 
 
