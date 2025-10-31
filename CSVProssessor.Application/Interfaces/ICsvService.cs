@@ -13,6 +13,13 @@
         /// </summary>
         Task<ImportCsvResponseDto> ImportCsvAsync(IFormFile file);
 
+        /// <summary>
+        /// Process CSV import: download file from MinIO, parse it, and save records to database
+        /// Called by CsvImportQueueListenerService
+        /// Handles: Download → Parse CSV → Save to DB → Update job status
+        /// </summary>
+        Task SaveCsvRecordsAsync(Guid jobId, string fileName);
+
         //download
         //Task<string> ExportCsvAsync(string exportFileName);
     }

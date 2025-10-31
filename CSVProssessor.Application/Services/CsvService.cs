@@ -6,6 +6,8 @@ using CSVProssessor.Domain.Entities;
 using CSVProssessor.Domain.Enums;
 using CSVProssessor.Infrastructure.Interfaces;
 using Microsoft.AspNetCore.Http;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CSVProssessor.Application.Services
 {
@@ -57,11 +59,11 @@ namespace CSVProssessor.Application.Services
             await _unitOfWork.SaveChangesAsync();
 
             // 3. Prepare and publish message to RabbitMQ queue
-            var message = new
+            var message = new CsvImportMessage
             {
-                jobId = jobId,
-                filename = file.FileName,
-                uploadedAt = DateTime.UtcNow
+                JobId = jobId,
+                FileName = file.FileName,
+                UploadedAt = DateTime.UtcNow
             };
 
             // Publish message vào queue cho background service xử lý
@@ -76,6 +78,83 @@ namespace CSVProssessor.Application.Services
                 Status = csvJob.Status.ToString(),
                 Message = "File CSV đã được tải lên thành công. Background service sẽ xử lý trong thời gian sớm nhất."
             };
+        }
+
+        /// <summary>
+        /// Process CSV import: download file from MinIO, parse it, and save records to database
+        /// Called by CsvImportQueueListenerService
+        /// Handles: Download → Parse CSV → Save to DB → Update job status
+        /// </summary>
+        public async Task SaveCsvRecordsAsync(Guid jobId, string fileName)
+        {
+            // 1. Download file from MinIO
+            using var fileStream = await _blobService.DownloadFileAsync(fileName);
+
+            // 2. Parse CSV file
+            var records = await ParseCsvAsync(jobId, fileName, fileStream);
+
+            if (records == null || records.Count == 0)
+                throw ErrorHelper.BadRequest("Không có records để lưu vào database.");
+
+            // 3. Add all records to database
+            foreach (var record in records)
+            {
+                await _unitOfWork.CsvRecords.AddAsync(record);
+            }
+            
+            // 4. Save changes to database
+            await _unitOfWork.SaveChangesAsync();
+
+            // 5. Update job status to Completed
+            var csvJob = await _unitOfWork.CsvJobs.FirstOrDefaultAsync(x => x.Id == jobId);
+            if (csvJob != null)
+            {
+                csvJob.Status = CsvJobStatus.Completed;
+                csvJob.UpdatedAt = DateTime.UtcNow;
+                await _unitOfWork.SaveChangesAsync();
+            }
+        }
+
+        /// <summary>
+        /// Parse CSV file into CsvRecord list
+        /// </summary>
+        private async Task<List<CsvRecord>> ParseCsvAsync(Guid jobId, string fileName, Stream fileStream)
+        {
+            var records = new List<CsvRecord>();
+            using var reader = new StreamReader(fileStream);
+
+            // Đọc header
+            var headerLine = await reader.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(headerLine))
+                return records;
+
+            var headers = headerLine.Split(',').Select(h => h.Trim()).ToArray();
+
+            string? line;
+            while ((line = await reader.ReadLineAsync()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                var values = line.Split(',').Select(v => v.Trim()).ToArray();
+
+                // Create JSON object as string and parse it
+                var jsonDict = new Dictionary<string, object>();
+                for (int i = 0; i < headers.Length && i < values.Length; i++)
+                {
+                    jsonDict[headers[i]] = values[i];
+                }
+
+                var jsonString = JsonSerializer.Serialize(jsonDict);
+                var jsonDoc = JsonDocument.Parse(jsonString);
+
+                records.Add(new CsvRecord
+                {
+                    JobId = jobId,
+                    FileName = fileName,
+                    ImportedAt = DateTime.UtcNow,
+                    Data = jsonDoc
+                });
+            }
+            return records;
         }
 
         //    /// <summary>

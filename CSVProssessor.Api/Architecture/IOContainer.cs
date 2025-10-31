@@ -2,6 +2,7 @@
 using CSVProssessor.Application.Interfaces.Common;
 using CSVProssessor.Application.Services;
 using CSVProssessor.Application.Services.Common;
+using CSVProssessor.Application.Worker;
 using CSVProssessor.Domain;
 using CSVProssessor.Infrastructure;
 using CSVProssessor.Infrastructure.Commons;
@@ -46,6 +47,9 @@ public static class IocContainer
         services.AddScoped<IBlobService, BlobService>();
         services.AddScoped<IRabbitMqService, RabbitMqService>();
         services.AddScoped<ICsvService, CsvService>();
+
+        // Register BackgroundServices
+        services.AddHostedService<CsvImportQueueListenerService>();
 
         // Configure RabbitMQ Connection
         services.AddSingleton(sp =>
