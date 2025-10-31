@@ -155,76 +155,6 @@ namespace CSVProssessor.Application.Services
             return records;
         }
 
-        //    /// <summary>
-        //    /// Export data as CSV file synchronously.
-        //    /// 1. Query data from PostgreSQL database
-        //    /// 2. Generate CSV content
-        //    /// 3. Upload CSV to MinIO blob storage
-        //    /// 4. Return presigned URL for download
-        //    /// </summary>
-        //    public async Task<string> ExportCsvAsync(string exportFileName)
-        //    {
-        //        // 1. Create export job record in database
-        //        var jobId = Guid.NewGuid();
-        //        var csvJob = new CsvJob
-        //        {
-        //            Id = jobId,
-        //            FileName = exportFileName,
-        //            Type = CsvJobType.Export,
-        //            Status = CsvJobStatus.Processing,
-        //            CreatedAt = DateTime.UtcNow,
-        //            UpdatedAt = DateTime.UtcNow
-        //        };
-
-        //        await _unitOfWork.CsvJobs.AddAsync(csvJob);
-        //        await _unitOfWork.SaveChangesAsync();
-
-        //        try
-        //        {
-        //            // 2. Query all CSV records from database
-        //            var records = await _unitOfWork.CsvRecords.GetAllAsync();
-
-        //            // 3. Generate CSV content
-        //            using var ms = new MemoryStream();
-        //            using (var writer = new StreamWriter(ms, leaveOpen: true))
-        //            {
-        //                // Write CSV header
-        //                await writer.WriteLineAsync("Id,JobId,FileName,ImportedAt,Data");
-
-        //                // Write CSV rows
-        //                foreach (var record in records)
-        //                {
-        //                    var dataJson = record.Data?.ToString() ?? "";
-        //                    var line = $"{record.Id},{record.JobId},{record.FileName},{record.ImportedAt:O},\"{dataJson}\"";
-        //                    await writer.WriteLineAsync(line);
-        //                }
-        //                await writer.FlushAsync();
-        //            }
-        //            ms.Position = 0;
-
-        //            // 4. Upload CSV to MinIO
-        //            await _blobService.UploadFileAsync(exportFileName, ms);
-
-        //            // 5. Generate presigned URL
-        //            var presignedUrl = await _blobService.GetFileUrlAsync(exportFileName);
-
-        //            // Update job status to Completed
-        //            csvJob.Status = CsvJobStatus.Completed;
-        //            csvJob.UpdatedAt = DateTime.UtcNow;
-        //            await _unitOfWork.SaveChangesAsync();
-
-        //            return presignedUrl;
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            // Update job status to Failed on error
-        //            csvJob.Status = CsvJobStatus.Failed;
-        //            csvJob.UpdatedAt = DateTime.UtcNow;
-        //            await _unitOfWork.SaveChangesAsync();
-
-        //            throw new Exception($"Export failed: {ex.Message}", ex);
-        //        }
-
 
         /// <summary>
         /// Detect changes and publish notification to RabbitMQ topic "csv-changes-topic"
@@ -297,6 +227,57 @@ namespace CSVProssessor.Application.Services
                 Message = records.Count > 0
                     ? $"Detected {records.Count} changes. Published: {publishedToTopic}"
                     : "No changes detected"
+            };
+
+            return response;
+        }
+
+
+        public async Task<ExportCsvResponseDto> ExportAllCsvFilesAsync()
+        {
+            // 1. Query all unique CSV file names from CsvJobs (import jobs)
+            var csvJobs = await _unitOfWork.CsvJobs.GetAllAsync(x =>
+                x.Type == CsvJobType.Import && !x.IsDeleted
+            );
+
+            if (csvJobs == null || csvJobs.Count == 0)
+                throw ErrorHelper.BadRequest("Không có file CSV nào để export.");
+
+            // 2. Get unique file names
+            var uniqueFileNames = csvJobs
+                .Select(x => x.FileName)
+                .Distinct()
+                .ToList();
+
+            // 3. Generate download URLs for each file
+            var fileUrls = new List<ExportedFileDto>();
+
+            foreach (var fileName in uniqueFileNames)
+            {
+
+                // Get presigned URL from blob storage
+                var downloadUrl = await _blobService.GetFileUrlAsync(fileName);
+                var job = csvJobs.FirstOrDefault(x => x.FileName == fileName);
+
+                fileUrls.Add(new ExportedFileDto
+                {
+                    FileName = fileName,
+                    DownloadUrl = downloadUrl,
+                    UploadedAt = job?.CreatedAt ?? DateTime.UtcNow,
+                    Status = job?.Status.ToString() ?? "Unknown"
+                });
+            }
+
+            if (fileUrls.Count == 0)
+                throw ErrorHelper.BadRequest("Không thể tạo download URLs cho files.");
+
+            // 4. Build response
+            var response = new ExportCsvResponseDto
+            {
+                TotalFiles = fileUrls.Count,
+                Files = fileUrls,
+                ExportedAt = DateTime.UtcNow,
+                Message = $"Successfully exported {fileUrls.Count} CSV files."
             };
 
             return response;

@@ -1,7 +1,6 @@
 ﻿namespace CSVProssessor.Application.Interfaces
 {
     using CSVProssessor.Domain.DTOs.CsvJobDTOs;
-    using CSVProssessor.Domain.Entities;
     using Microsoft.AspNetCore.Http;
 
     public interface ICsvService
@@ -27,7 +26,10 @@
         /// </summary>
         Task<DetectChangesResponseDto> DetectAndPublishChangesAsync(DetectChangesRequestDto request);
 
-        //download
-        //Task<string> ExportCsvAsync(string exportFileName);
+        /// <summary>
+        /// Export all CSV files that have been uploaded to the system.
+        /// Returns a list of all uploaded CSV file names with their download URLs.
+        /// </summary>
+        Task<ExportCsvResponseDto> ExportAllCsvFilesAsync();
     }
 }

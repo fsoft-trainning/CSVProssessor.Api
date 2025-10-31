@@ -31,5 +31,22 @@ namespace CSVProssessor.Api.Controllers
                 return StatusCode(statusCode, errorResponse);
             }
         }
+
+        [HttpGet("export")]
+        public async Task<IActionResult> ExportAllCsvFilesAsync()
+        {
+            try
+            {
+                var result = await _csvService.ExportAllCsvFilesAsync();
+                return Ok(ApiResult<object>.Success(result));
+            }
+            catch (Exception ex)
+            {
+                // Handle exception
+                var statusCode = ExceptionUtils.ExtractStatusCode(ex);
+                var errorResponse = ExceptionUtils.CreateErrorResponse<object>(ex);
+                return StatusCode(statusCode, errorResponse);
+            }
+        }
     }
 }
