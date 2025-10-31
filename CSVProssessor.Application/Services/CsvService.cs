@@ -1,8 +1,11 @@
 ﻿using CSVProssessor.Application.Interfaces;
 using CSVProssessor.Application.Interfaces.Common;
+using CSVProssessor.Application.Utils;
+using CSVProssessor.Domain.DTOs.CsvJobDTOs;
 using CSVProssessor.Domain.Entities;
 using CSVProssessor.Domain.Enums;
 using CSVProssessor.Infrastructure.Interfaces;
+using Microsoft.AspNetCore.Http;
 
 namespace CSVProssessor.Application.Services
 {
@@ -19,30 +22,37 @@ namespace CSVProssessor.Application.Services
             _rabbitMqService = rabbitMqService;
         }
 
-        /// <summary>
-        /// Import CSV asynchronously.
-        /// 1. Upload file to MinIO
-        /// 2. Create CsvJob record in database with Pending status
-        /// 3. Publish message to RabbitMQ queue for background processing
-        /// </summary>
-        public async Task<Guid> ImportCsvAsync(Stream fileStream, string fileName)
-        {
-            // 1. Upload file to MinIO blob storage
-            await _blobService.UploadFileAsync(fileName, fileStream);
 
-            // 2. Create job record in database
+        public async Task<ImportCsvResponseDto> ImportCsvAsync(IFormFile file)
+        {
+            // Kiểm tra input hợp lệ
+            if (file == null)
+                throw ErrorHelper.BadRequest("File không được để trống.");
+
+            if (file.Length == 0)
+                throw ErrorHelper.BadRequest("File không được rỗng.");
+
+            if (string.IsNullOrWhiteSpace(file.FileName))
+                throw ErrorHelper.BadRequest("Tên file không được để trống.");
+
+            // Đọc file stream từ IFormFile
+            using var stream = file.OpenReadStream();
+
+            // 1. tải file lên MinIO blob storage
+            await _blobService.UploadFileAsync(file.FileName, stream);
+
+            // 2. ghi nhận job vào database
             var jobId = Guid.NewGuid();
             var csvJob = new CsvJob
             {
                 Id = jobId,
-                FileName = fileName,
+                FileName = file.FileName,
                 Type = CsvJobType.Import,
                 Status = CsvJobStatus.Pending,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
 
-            // Add job to repository and save
             await _unitOfWork.CsvJobs.AddAsync(csvJob);
             await _unitOfWork.SaveChangesAsync();
 
@@ -50,86 +60,92 @@ namespace CSVProssessor.Application.Services
             var message = new
             {
                 jobId = jobId,
-                filename = fileName,
+                filename = file.FileName,
                 uploadedAt = DateTime.UtcNow
             };
 
-            // Publish to csv-import-queue for background service to consume
+            // Publish message vào queue cho background service xử lý
             await _rabbitMqService.PublishAsync("csv-import-queue", message);
 
-            // Return job ID for tracking
-            return jobId;
-        }
-
-        /// <summary>
-        /// Export data as CSV file synchronously.
-        /// 1. Query data from PostgreSQL database
-        /// 2. Generate CSV content
-        /// 3. Upload CSV to MinIO blob storage
-        /// 4. Return presigned URL for download
-        /// </summary>
-        public async Task<string> ExportCsvAsync(string exportFileName)
-        {
-            // 1. Create export job record in database
-            var jobId = Guid.NewGuid();
-            var csvJob = new CsvJob
+            // Return response DTO
+            return new ImportCsvResponseDto
             {
-                Id = jobId,
-                FileName = exportFileName,
-                Type = CsvJobType.Export,
-                Status = CsvJobStatus.Processing,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                JobId = jobId,
+                FileName = file.FileName,
+                UploadedAt = DateTime.UtcNow,
+                Status = csvJob.Status.ToString(),
+                Message = "File CSV đã được tải lên thành công. Background service sẽ xử lý trong thời gian sớm nhất."
             };
-
-            await _unitOfWork.CsvJobs.AddAsync(csvJob);
-            await _unitOfWork.SaveChangesAsync();
-
-            try
-            {
-                // 2. Query all CSV records from database
-                var records = await _unitOfWork.CsvRecords.GetAllAsync();
-
-                // 3. Generate CSV content
-                using var ms = new MemoryStream();
-                using (var writer = new StreamWriter(ms, leaveOpen: true))
-                {
-                    // Write CSV header
-                    await writer.WriteLineAsync("Id,JobId,FileName,ImportedAt,Data");
-
-                    // Write CSV rows
-                    foreach (var record in records)
-                    {
-                        var dataJson = record.Data?.ToString() ?? "";
-                        var line = $"{record.Id},{record.JobId},{record.FileName},{record.ImportedAt:O},\"{dataJson}\"";
-                        await writer.WriteLineAsync(line);
-                    }
-                    await writer.FlushAsync();
-                }
-                ms.Position = 0;
-
-                // 4. Upload CSV to MinIO
-                await _blobService.UploadFileAsync(exportFileName, ms);
-
-                // 5. Generate presigned URL
-                var presignedUrl = await _blobService.GetFileUrlAsync(exportFileName);
-
-                // Update job status to Completed
-                csvJob.Status = CsvJobStatus.Completed;
-                csvJob.UpdatedAt = DateTime.UtcNow;
-                await _unitOfWork.SaveChangesAsync();
-
-                return presignedUrl;
-            }
-            catch (Exception ex)
-            {
-                // Update job status to Failed on error
-                csvJob.Status = CsvJobStatus.Failed;
-                csvJob.UpdatedAt = DateTime.UtcNow;
-                await _unitOfWork.SaveChangesAsync();
-
-                throw new Exception($"Export failed: {ex.Message}", ex);
-            }
         }
+
+        //    /// <summary>
+        //    /// Export data as CSV file synchronously.
+        //    /// 1. Query data from PostgreSQL database
+        //    /// 2. Generate CSV content
+        //    /// 3. Upload CSV to MinIO blob storage
+        //    /// 4. Return presigned URL for download
+        //    /// </summary>
+        //    public async Task<string> ExportCsvAsync(string exportFileName)
+        //    {
+        //        // 1. Create export job record in database
+        //        var jobId = Guid.NewGuid();
+        //        var csvJob = new CsvJob
+        //        {
+        //            Id = jobId,
+        //            FileName = exportFileName,
+        //            Type = CsvJobType.Export,
+        //            Status = CsvJobStatus.Processing,
+        //            CreatedAt = DateTime.UtcNow,
+        //            UpdatedAt = DateTime.UtcNow
+        //        };
+
+        //        await _unitOfWork.CsvJobs.AddAsync(csvJob);
+        //        await _unitOfWork.SaveChangesAsync();
+
+        //        try
+        //        {
+        //            // 2. Query all CSV records from database
+        //            var records = await _unitOfWork.CsvRecords.GetAllAsync();
+
+        //            // 3. Generate CSV content
+        //            using var ms = new MemoryStream();
+        //            using (var writer = new StreamWriter(ms, leaveOpen: true))
+        //            {
+        //                // Write CSV header
+        //                await writer.WriteLineAsync("Id,JobId,FileName,ImportedAt,Data");
+
+        //                // Write CSV rows
+        //                foreach (var record in records)
+        //                {
+        //                    var dataJson = record.Data?.ToString() ?? "";
+        //                    var line = $"{record.Id},{record.JobId},{record.FileName},{record.ImportedAt:O},\"{dataJson}\"";
+        //                    await writer.WriteLineAsync(line);
+        //                }
+        //                await writer.FlushAsync();
+        //            }
+        //            ms.Position = 0;
+
+        //            // 4. Upload CSV to MinIO
+        //            await _blobService.UploadFileAsync(exportFileName, ms);
+
+        //            // 5. Generate presigned URL
+        //            var presignedUrl = await _blobService.GetFileUrlAsync(exportFileName);
+
+        //            // Update job status to Completed
+        //            csvJob.Status = CsvJobStatus.Completed;
+        //            csvJob.UpdatedAt = DateTime.UtcNow;
+        //            await _unitOfWork.SaveChangesAsync();
+
+        //            return presignedUrl;
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            // Update job status to Failed on error
+        //            csvJob.Status = CsvJobStatus.Failed;
+        //            csvJob.UpdatedAt = DateTime.UtcNow;
+        //            await _unitOfWork.SaveChangesAsync();
+
+        //            throw new Exception($"Export failed: {ex.Message}", ex);
+        //        }
     }
 }

@@ -1,27 +1,23 @@
 ﻿namespace CSVProssessor.Infrastructure.Interfaces
 {
-    /// <summary>
-    /// A service for publishing messages to RabbitMQ.
-    /// Consumption is handled by background services.
-    /// </summary>
     public interface IRabbitMqService
     {
         /// <summary>
-        /// Publishes a message to a specified RabbitMQ queue or exchange (topic).
+        /// Gửi message tới queue hoặc exchange (topic) cụ thể trong RabbitMQ
         /// </summary>
-        /// <typeparam name="T">The type of the message object.</typeparam>
-        /// <param name="destination">The name of the queue or exchange.</param>
-        /// <param name="message">The message object to be serialized and sent.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
+        /// <typeparam name="T">Kiểu dữ liệu của message</typeparam>
+        /// <param name="destination">Tên queue hoặc exchange muốn gửi tới</param>
+        /// <param name="message">Đối tượng message cần gửi (sẽ được JSON serialize)</param>
+        /// <returns>Task đại diện cho thao tác bất đồng bộ</returns>
         Task PublishAsync<T>(string destination, T message);
 
         /// <summary>
-        /// Publishes a message to a RabbitMQ topic (fanout exchange) for broadcasting to multiple subscribers.
+        /// Gửi message tới topic (fanout exchange) - Phát tán cho nhiều subscriber cùng nhận
         /// </summary>
-        /// <typeparam name="T">The type of the message object.</typeparam>
-        /// <param name="topicName">The name of the topic (exchange).</param>
-        /// <param name="message">The message object to be serialized and sent.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
+        /// <typeparam name="T">Kiểu dữ liệu của message</typeparam>
+        /// <param name="topicName">Tên của topic (exchange)</param>
+        /// <param name="message">Đối tượng message cần gửi (sẽ được JSON serialize)</param>
+        /// <returns>Task đại diện cho thao tác bất đồng bộ</returns>
         Task PublishToTopicAsync<T>(string topicName, T message);
     }
 }

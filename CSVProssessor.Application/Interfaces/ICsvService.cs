@@ -1,11 +1,19 @@
 ﻿namespace CSVProssessor.Application.Interfaces
 {
+    using CSVProssessor.Domain.DTOs.CsvJobDTOs;
+    using Microsoft.AspNetCore.Http;
+
     public interface ICsvService
     {
-        //upload
-        Task<Guid> ImportCsvAsync(Stream fileStream, string fileName);
+        /// <summary>
+        /// Import CSV asynchronously.
+        /// Upload file to MinIO
+        /// Create CsvJob record in database with Pending status
+        /// Publish message to RabbitMQ queue for background processing
+        /// </summary>
+        Task<ImportCsvResponseDto> ImportCsvAsync(IFormFile file);
 
         //download
-        Task<string> ExportCsvAsync(string exportFileName);
+        //Task<string> ExportCsvAsync(string exportFileName);
     }
 }

@@ -1,4 +1,5 @@
 ﻿using CSVProssessor.Application.Interfaces;
+using CSVProssessor.Application.Utils;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CSVProssessor.Api.Controllers
@@ -17,13 +18,18 @@ namespace CSVProssessor.Api.Controllers
         [HttpPost("upload")]
         public async Task<IActionResult> UploadCsvAsync(IFormFile file)
         {
-            if (file == null || file.Length == 0)
+            try
             {
-                return BadRequest("No file uploaded.");
+                var result = await _csvService.ImportCsvAsync(file);
+                return Accepted(ApiResult<object>.Success(result));
             }
-            using var stream = file.OpenReadStream();
-            var importId = await _csvService.ImportCsvAsync(stream, file.FileName);
-            return Ok(new { ImportId = importId });
+            catch (Exception ex)
+            {
+                // Handle exception
+                var statusCode = ExceptionUtils.ExtractStatusCode(ex);
+                var errorResponse = ExceptionUtils.CreateErrorResponse<object>(ex);
+                return StatusCode(statusCode, errorResponse);
+            }
         }
     }
 }
