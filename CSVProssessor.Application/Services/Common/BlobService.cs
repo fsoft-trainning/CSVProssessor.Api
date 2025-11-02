@@ -129,6 +129,15 @@ namespace CSVProssessor.Application.Services.Common
                     .WithExpiry(7 * 24 * 60 * 60);
 
                 var fileUrl = await _minioClient.PresignedGetObjectAsync(args);
+                
+                // Replace internal MinIO URL with public URL for external access
+                var minioPublicUrl = Environment.GetEnvironmentVariable("MINIO_PUBLIC_URL");
+                if (!string.IsNullOrWhiteSpace(minioPublicUrl))
+                {
+                    // Replace minio:9000 with localhost:9000 (or configured public URL)
+                    fileUrl = fileUrl.Replace("minio:9000", minioPublicUrl.Replace("http://", "").Replace("https://", ""));
+                }
+                
                 _logger.Success($"Presigned file URL generated: {fileUrl}");
                 return fileUrl;
             }

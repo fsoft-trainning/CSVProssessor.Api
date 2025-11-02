@@ -27,9 +27,22 @@
         Task<DetectChangesResponseDto> DetectAndPublishChangesAsync(DetectChangesRequestDto request);
 
         /// <summary>
-        /// Export all CSV files that have been uploaded to the system.
-        /// Returns a list of all uploaded CSV file names with their download URLs.
+        /// List all CSV files that have been uploaded to the system.
+        /// Returns metadata about each file including name, status, upload time, and record count.
         /// </summary>
-        Task<ExportCsvResponseDto> ExportAllCsvFilesAsync();
+        Task<ListCsvFilesResponseDto> ListAllCsvFilesAsync();
+
+        /// <summary>
+        /// Export a specific CSV file by filename.
+        /// Downloads the file from MinIO and returns it as a stream.
+        /// </summary>
+        /// <param name="fileName">Name of the CSV file to export</param>
+        Task<Stream> ExportSingleCsvFileAsync(string fileName);
+
+        /// <summary>
+        /// Export all CSV files that have been uploaded to the system.
+        /// Downloads files from MinIO and returns them as a zip archive stream.
+        /// </summary>
+        Task<Stream> ExportAllCsvFilesAsync();
     }
 }

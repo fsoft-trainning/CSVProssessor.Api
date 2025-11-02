@@ -27,7 +27,7 @@
         /// </summary>
         Task DeleteFileAsync(string fileName);
 
-        /// <summary>S
+        /// <summary>
         /// Thay thế ảnh cũ bằng ảnh mới: xóa ảnh cũ nếu có, upload ảnh mới và trả về preview URL.
         /// </summary>
         Task<string> ReplaceImageAsync(Stream newImageStream, string newImageName, string? oldImageUrl,

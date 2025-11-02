@@ -6,6 +6,7 @@ using CSVProssessor.Domain.Entities;
 using CSVProssessor.Domain.Enums;
 using CSVProssessor.Infrastructure.Interfaces;
 using Microsoft.AspNetCore.Http;
+using System.IO.Compression;
 using System.Text.Json;
 
 namespace CSVProssessor.Application.Services
@@ -35,18 +36,27 @@ namespace CSVProssessor.Application.Services
             if (string.IsNullOrWhiteSpace(file.FileName))
                 throw ErrorHelper.BadRequest("Tên file không được để trống.");
 
+            // Generate unique file name to avoid conflicts
+            var originalFileName = file.FileName;
+            var fileExtension = Path.GetExtension(originalFileName);
+            var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(originalFileName);
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            var uniqueId = Guid.NewGuid().ToString("N").Substring(0, 8); // Short GUID (8 chars)
+            var uniqueFileName = $"{fileNameWithoutExtension}_{timestamp}_{uniqueId}{fileExtension}";
+
             // Đọc file stream từ IFormFile
             using var stream = file.OpenReadStream();
 
-            // 1. tải file lên MinIO blob storage
-            await _blobService.UploadFileAsync(file.FileName, stream);
+            // 1. tải file lên MinIO blob storage với unique name
+            await _blobService.UploadFileAsync(uniqueFileName, stream);
 
             // 2. ghi nhận job vào database
             var jobId = Guid.NewGuid();
             var csvJob = new CsvJob
             {
                 Id = jobId,
-                FileName = file.FileName,
+                FileName = uniqueFileName,
+                OriginalFileName = originalFileName,
                 Type = CsvJobType.Import,
                 Status = CsvJobStatus.Pending,
                 CreatedAt = DateTime.UtcNow,
@@ -60,7 +70,7 @@ namespace CSVProssessor.Application.Services
             var message = new CsvImportMessage
             {
                 JobId = jobId,
-                FileName = file.FileName,
+                FileName = uniqueFileName,
                 UploadedAt = DateTime.UtcNow
             };
 
@@ -71,10 +81,10 @@ namespace CSVProssessor.Application.Services
             return new ImportCsvResponseDto
             {
                 JobId = jobId,
-                FileName = file.FileName,
+                FileName = uniqueFileName,
                 UploadedAt = DateTime.UtcNow,
                 Status = csvJob.Status.ToString(),
-                Message = "File CSV đã được tải lên thành công. Background service sẽ xử lý trong thời gian sớm nhất."
+                Message = $"File CSV đã được tải lên thành công với tên: {uniqueFileName}. Background service sẽ xử lý trong thời gian sớm nhất."
             };
         }
 
@@ -152,6 +162,7 @@ namespace CSVProssessor.Application.Services
                     Data = jsonDoc
                 });
             }
+
             return records;
         }
 
@@ -233,54 +244,126 @@ namespace CSVProssessor.Application.Services
         }
 
 
-        public async Task<ExportCsvResponseDto> ExportAllCsvFilesAsync()
+        public async Task<ListCsvFilesResponseDto> ListAllCsvFilesAsync()
         {
-            // 1. Query all unique CSV file names from CsvJobs (import jobs)
+            // 1. Query all CSV import jobs from database
             var csvJobs = await _unitOfWork.CsvJobs.GetAllAsync(x =>
                 x.Type == CsvJobType.Import && !x.IsDeleted
             );
 
             if (csvJobs == null || csvJobs.Count == 0)
+            {
+                return new ListCsvFilesResponseDto
+                {
+                    TotalFiles = 0,
+                    Files = new List<CsvFileInfoDto>(),
+                    GeneratedAt = DateTime.UtcNow,
+                    Message = "Không có file CSV nào trong hệ thống."
+                };
+            }
+
+            // 2. Group by filename and get metadata for each file
+            var fileInfoList = new List<CsvFileInfoDto>();
+
+            foreach (var job in csvJobs)
+            {
+                // Count records for this job
+                var recordCount = await _unitOfWork.CsvRecords.CountAsync(x =>
+                    x.JobId == job.Id && !x.IsDeleted
+                );
+
+                fileInfoList.Add(new CsvFileInfoDto
+                {
+                    FileName = job.FileName,
+                    OriginalFileName = job.OriginalFileName,
+                    JobId = job.Id,
+                    UploadedAt = job.CreatedAt,
+                    Status = job.Status.ToString(),
+                    RecordCount = recordCount
+                });
+            }
+
+            // 3. Build response
+            var response = new ListCsvFilesResponseDto
+            {
+                TotalFiles = fileInfoList.Count,
+                Files = fileInfoList.OrderByDescending(x => x.UploadedAt).ToList(),
+                GeneratedAt = DateTime.UtcNow,
+                Message = $"Tìm thấy {fileInfoList.Count} file CSV trong hệ thống."
+            };
+
+            return response;
+        }
+
+
+        public async Task<Stream> ExportSingleCsvFileAsync(string fileName)
+        {
+            // 1. Validate input
+            if (string.IsNullOrWhiteSpace(fileName))
+                throw ErrorHelper.BadRequest("Tên file không được để trống.");
+
+            // 2. Check if file exists in database
+            var csvJob = await _unitOfWork.CsvJobs.FirstOrDefaultAsync(x =>
+                x.FileName == fileName && x.Type == CsvJobType.Import && !x.IsDeleted
+            );
+
+            if (csvJob == null)
+                throw ErrorHelper.NotFound($"Không tìm thấy file '{fileName}' trong hệ thống.");
+
+            // 3. Download file from MinIO
+            try
+            {
+                var fileStream = await _blobService.DownloadFileAsync(fileName);
+                return fileStream;
+            }
+            catch (Exception ex)
+            {
+                throw ErrorHelper.Internal($"Lỗi khi download file '{fileName}': {ex.Message}");
+            }
+        }
+
+
+        public async Task<Stream> ExportAllCsvFilesAsync()
+        {
+            var csvJobs = await _unitOfWork.CsvJobs.GetAllAsync(x =>
+                x.Type == CsvJobType.Import && !x.IsDeleted);
+
+            if (csvJobs == null || csvJobs.Count == 0)
                 throw ErrorHelper.BadRequest("Không có file CSV nào để export.");
 
-            // 2. Get unique file names
             var uniqueFileNames = csvJobs
                 .Select(x => x.FileName)
                 .Distinct()
                 .ToList();
 
-            // 3. Generate download URLs for each file
-            var fileUrls = new List<ExportedFileDto>();
+            var zipStream = new MemoryStream();
 
-            foreach (var fileName in uniqueFileNames)
+            using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, true))
             {
-
-                // Get presigned URL from blob storage
-                var downloadUrl = await _blobService.GetFileUrlAsync(fileName);
-                var job = csvJobs.FirstOrDefault(x => x.FileName == fileName);
-
-                fileUrls.Add(new ExportedFileDto
+                foreach (var fileName in uniqueFileNames)
                 {
-                    FileName = fileName,
-                    DownloadUrl = downloadUrl,
-                    UploadedAt = job?.CreatedAt ?? DateTime.UtcNow,
-                    Status = job?.Status.ToString() ?? "Unknown"
-                });
+                    await AddFileToZipArchiveAsync(archive, fileName);
+                }
             }
 
-            if (fileUrls.Count == 0)
-                throw ErrorHelper.BadRequest("Không thể tạo download URLs cho files.");
+            zipStream.Position = 0;
+            return zipStream;
+        }
 
-            // 4. Build response
-            var response = new ExportCsvResponseDto
+        private async Task AddFileToZipArchiveAsync(ZipArchive archive, string fileName)
+        {
+            try
             {
-                TotalFiles = fileUrls.Count,
-                Files = fileUrls,
-                ExportedAt = DateTime.UtcNow,
-                Message = $"Successfully exported {fileUrls.Count} CSV files."
-            };
+                using var fileStream = await _blobService.DownloadFileAsync(fileName);
+                var entry = archive.CreateEntry(fileName, CompressionLevel.Optimal);
 
-            return response;
+                using var entryStream = entry.Open();
+                await fileStream.CopyToAsync(entryStream);
+            }
+            catch (Exception ex)
+            {
+                throw ErrorHelper.Internal($"Lỗi khi download file '{fileName}': {ex.Message}");
+            }
         }
     }
 }

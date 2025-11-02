@@ -75,6 +75,7 @@ services:
       
       # MinioS3 Configuration
       MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_PUBLIC_URL: "http://localhost:9000"
       MINIO_ACCESS_KEY: "minioadmin"
       MINIO_SECRET_KEY: "minioadmin"
       MINIO_BUCKET: "csvfiles"
@@ -119,6 +120,7 @@ services:
       
       # MinioS3 Configuration
       MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_PUBLIC_URL: "http://localhost:9000"
       MINIO_ACCESS_KEY: "minioadmin"
       MINIO_SECRET_KEY: "minioadmin"
       MINIO_BUCKET: "csvfiles"
