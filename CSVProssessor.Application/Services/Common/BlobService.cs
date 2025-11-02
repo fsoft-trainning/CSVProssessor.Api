@@ -25,57 +25,41 @@ namespace CSVProssessor.Application.Services.Common
             var accessKey = Environment.GetEnvironmentVariable("MINIO_ACCESS_KEY")?.Trim();
             var secretKey = Environment.GetEnvironmentVariable("MINIO_SECRET_KEY")?.Trim();
 
-            if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(accessKey) || string.IsNullOrWhiteSpace(secretKey))
+            if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(accessKey) ||
+                string.IsNullOrWhiteSpace(secretKey))
             {
-                throw new InvalidOperationException("MinIO configuration is missing. Please set MINIO_ENDPOINT, MINIO_ACCESS_KEY, and MINIO_SECRET_KEY environment variables.");
+                throw new InvalidOperationException(
+                    "MinIO configuration is missing. Please set MINIO_ENDPOINT, MINIO_ACCESS_KEY, and MINIO_SECRET_KEY environment variables.");
             }
 
-            _logger.Info("Initializing BlobService...");
-            _logger.Info($"Connecting to MinIO at: {endpoint}");
 
-            try
-            {
-                // Remove http:// or https:// prefix if present - MinIO expects just host:port
-                var cleanEndpoint = endpoint
-                    .Replace("https://", "", StringComparison.OrdinalIgnoreCase)
-                    .Replace("http://", "", StringComparison.OrdinalIgnoreCase)
-                    .Trim();
+            // Remove http:// or https:// prefix if present - MinIO expects just host:port
+            var cleanEndpoint = endpoint
+                .Replace("https://", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("http://", "", StringComparison.OrdinalIgnoreCase)
+                .Trim();
 
-                _logger.Info($"Cleaned endpoint: {cleanEndpoint}");
 
-                // Kết nối MinIO không dùng SSL (vì đang dùng IP:port hoặc HTTP)
-                _minioClient = new MinioClient()
-                    .WithEndpoint(cleanEndpoint)
-                    .WithCredentials(accessKey, secretKey)
-                    .WithSSL(false)
-                    .Build();
-
-                _logger.Success("MinIO client initialized successfully.");
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Failed to initialize MinIO client: {ex.Message}");
-                throw;
-            }
+            // Kết nối MinIO không dùng SSL (vì đang dùng IP:port hoặc HTTP)
+            _minioClient = new MinioClient()
+                .WithEndpoint(cleanEndpoint)
+                .WithCredentials(accessKey, secretKey)
+                .WithSSL(false)
+                .Build();
         }
 
         public async Task UploadFileAsync(string fileName, Stream fileStream)
         {
-            _logger.Info($"Starting file upload: {fileName}");
-
             try
             {
                 // Kiểm tra bucket tồn tại, nếu chưa thì tạo mới
                 var beArgs = new BucketExistsArgs().WithBucket(_bucketName);
                 var found = await _minioClient.BucketExistsAsync(beArgs);
-                _logger.Info($"Checking if bucket '{_bucketName}' exists: {found}");
 
                 if (!found)
                 {
-                    _logger.Warn($"Bucket '{_bucketName}' not found. Creating a new one...");
                     var mbArgs = new MakeBucketArgs().WithBucket(_bucketName);
                     await _minioClient.MakeBucketAsync(mbArgs);
-                    _logger.Success($"Bucket '{_bucketName}' created successfully.");
                 }
 
                 // Lấy content type dựa trên phần mở rộng của file
@@ -89,7 +73,6 @@ namespace CSVProssessor.Application.Services.Common
                     .WithContentType(contentType);
 
                 await _minioClient.PutObjectAsync(putObjectArgs);
-                _logger.Success($"File '{fileName}' uploaded successfully.");
             }
             catch (MinioException minioEx)
             {
@@ -129,15 +112,16 @@ namespace CSVProssessor.Application.Services.Common
                     .WithExpiry(7 * 24 * 60 * 60);
 
                 var fileUrl = await _minioClient.PresignedGetObjectAsync(args);
-                
+
                 // Replace internal MinIO URL with public URL for external access
                 var minioPublicUrl = Environment.GetEnvironmentVariable("MINIO_PUBLIC_URL");
                 if (!string.IsNullOrWhiteSpace(minioPublicUrl))
                 {
                     // Replace minio:9000 with localhost:9000 (or configured public URL)
-                    fileUrl = fileUrl.Replace("minio:9000", minioPublicUrl.Replace("http://", "").Replace("https://", ""));
+                    fileUrl = fileUrl.Replace("minio:9000",
+                        minioPublicUrl.Replace("http://", "").Replace("https://", ""));
                 }
-                
+
                 _logger.Success($"Presigned file URL generated: {fileUrl}");
                 return fileUrl;
             }
@@ -158,10 +142,7 @@ namespace CSVProssessor.Application.Services.Common
                 var getObjectArgs = new GetObjectArgs()
                     .WithBucket(_bucketName)
                     .WithObject(fileName)
-                    .WithCallbackStream(async (stream) =>
-                    {
-                        await stream.CopyToAsync(memoryStream);
-                    });
+                    .WithCallbackStream(async (stream) => { await stream.CopyToAsync(memoryStream); });
 
                 await _minioClient.GetObjectAsync(getObjectArgs);
                 memoryStream.Position = 0; // Reset stream position to beginning

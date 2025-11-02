@@ -94,6 +94,8 @@ services:
       ASPNETCORE_URLS: "http://+:5000"
       INSTANCE_NAME: "api-1"
       
+    volumes:
+      - ./Materials/Logs:/app/Materials/Logs
     ports:
       - "5001:5000"
     depends_on:
@@ -139,6 +141,8 @@ services:
       ASPNETCORE_URLS: "http://+:5000"
       INSTANCE_NAME: "api-2"
       
+    volumes:
+      - ./Materials/Logs:/app/Materials/Logs
     ports:
       - "5002:5000"
     depends_on:
